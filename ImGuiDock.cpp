@@ -398,9 +398,6 @@ namespace ImGuiDock
 	{
 		ImGui::SetCursorPos(cursorPos);
 
-		ImGui::PushStyleColor(ImGuiCol_CloseButton, ImVec4(.31, .31, .31, 1));
-		ImGui::PushStyleColor(ImGuiCol_CloseButtonHovered, ImVec4(.3, .3, .3, 1));
-		ImGui::PushStyleColor(ImGuiCol_CloseButtonActive, ImVec4(.2, .2, .2, 1));
 		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(14, 3));
 		for (auto dock : container->docks)
 		{
@@ -429,6 +426,5 @@ namespace ImGuiDock
 			ImGui::PopStyleColor(3);
 		}
 		ImGui::PopStyleVar();
-		ImGui::PopStyleColor(3);
 	};
 }
