@@ -2,7 +2,7 @@
 
 namespace ImGuiDock
 {
-	Dockspace::Dockspace()
+	Dockspace::Dockspace(GuiWindowList *windowListPtr, GuiWindow *owner) : m_windowListPtr(windowListPtr), m_owner(owner)
 	{
 	};
 
@@ -214,21 +214,9 @@ namespace ImGuiDock
 				}
 				for (int i = 0; i < m_containers.size(); i++)
 				{
-					if (toDelete == m_containers[i])
-					{
-						delete m_containers[i];
-						m_containers.erase(m_containers.begin() + i);
-					}
-					if(m_containers.size() > 1 && parentToDelete == m_containers[i])
-					{
-						delete m_containers[i];
-						m_containers.erase(m_containers.begin() + i);
-					}
-					if (m_containers.size() > 1 && toDelete == m_containers[i])
-					{
-						delete m_containers[i];
-						m_containers.erase(m_containers.begin() + i);
-					}
+					if (toDelete == m_containers[i]) { delete m_containers[i]; m_containers.erase(m_containers.begin() + i); }
+					if(m_containers.size() > 1 && parentToDelete == m_containers[i]) { delete m_containers[i]; m_containers.erase(m_containers.begin() + i); }
+					if (m_containers.size() > 1 && toDelete == m_containers[i]) { delete m_containers[i]; m_containers.erase(m_containers.begin() + i); }
 				}
 			}
 			return true;
@@ -238,6 +226,8 @@ namespace ImGuiDock
 
 	void Dockspace::updateAndDraw(ImVec2 dockspaceSize)
 	{
+		//m_container.size = size;
+
 		uint32_t idgen = 0;
 
 		float tabbarHeight = 20;
@@ -269,8 +259,36 @@ namespace ImGuiDock
 				ImGui::BeginChild(idname.c_str(), calculatedSize, false, ImGuiWindowFlags_AlwaysUseWindowPadding);
 				container->activeDock->drawFunction(calculatedSize);
 				container->activeDock->lastSize = calculatedSize;
-
 				ImGui::EndChild();
+
+				GuiWindow *draggedWindow = _isAnyWindowDragging();
+				if (draggedWindow != nullptr && draggedWindow->getDockspace()->m_container.splits[0]->activeDock != container->activeDock)
+				{
+					int mousex, mousey,wposx,wposy;
+					m_owner->getMouseScreenPosition(mousex, mousey);
+					m_owner->getWindowPosition(wposx, wposy);
+					mousex -= wposx;
+					mousey -= wposy;
+					if ((mousex > screenCursorPos.x && mousex < (screenCursorPos.x+size.x)) &&
+						(mousey > screenCursorPos.y && mousey < (screenCursorPos.y + size.y)))
+					{
+						ImGui::BeginChild("##dockSlotPreview");
+						ImGui::PushClipRect(ImVec2(),ImGui::GetIO().DisplaySize, false);
+						DockSlot dockSlot = _renderDockSlotPreview(mousex, mousey, screenCursorPos, size);
+						ImGui::PopClipRect();
+						ImGui::EndChild();
+						if (dockSlot != DockSlot::None)
+						{
+							Dock *draggedWindowDock = draggedWindow->getDockspace()->m_container.splits[0]->activeDock;
+							draggedWindowDock->redockFrom = this;
+							draggedWindowDock->redockTo = container->activeDock;
+							draggedWindowDock->redockSlot = dockSlot;
+							draggedWindowDock->redockFromWindow = m_owner;
+						}
+						else draggedWindow->getDockspace()->m_container.splits[0]->activeDock->redockTo = nullptr;
+					}
+				}
+
 				ImGui::PopStyleColor(1);
 			}
 			else
@@ -353,6 +371,52 @@ namespace ImGuiDock
 		ImVec2 backup_pos = ImGui::GetCursorPos();
 		renderContainer(&m_container, dockspaceSize, backup_pos);
 		ImGui::SetCursorPos(backup_pos);
+
+		if (m_currentDockTo)
+		{
+			if (m_currentDockToAction == eUndock)
+			{
+				if (undock(m_currentDockTo))
+				{
+					ImGuiContext *imguiContext = ImGui::GetCurrentContext();
+					m_currentDockTo->container = nullptr;
+					m_currentDockTo->draging = true;
+					GuiWindow *guiWindow = new GuiWindow(m_windowListPtr, m_currentDockTo->title, 0, 0, m_currentDockTo->lastSize.x, m_currentDockTo->lastSize.y /*+ 32*/, GuiWindow::fShow);
+					guiWindow->dockspace.dock(m_currentDockTo, DockSlot::Tab, 0, true);
+					guiWindow->setMinMaxSize(m_currentDockTo->minSize.x, m_currentDockTo->minSize.y, 0, 0);
+					auto &io = m_owner->m_imGuiContext->IO;
+					guiWindow->setPosition((int)(io.MousePos.x) + m_owner->m_posx-20, (int)io.MousePos.y + m_owner->m_posy- tabbarHeight/2+2);
+				//	SetActiveWindow(guiWindow->getWindowHandle());
+					//SetFocus(guiWindow->getWindowHandle());
+
+					m_windowListPtr->push_back(guiWindow);
+					ImGui::SetCurrentContext(imguiContext);
+				}
+			}
+			else if (m_currentDockToAction == eDrag)
+			{
+				if (!m_currentDockTo->draging)
+				{
+					if (m_owner)
+					{
+						m_owner->setPosition(m_owner->m_posx, m_owner->m_posy + 32-4);
+						m_owner->setSize(m_owner->m_width, m_owner->m_height - 32);
+					}
+
+				}
+				m_currentDockTo->draging = true;
+			}
+			else if(m_currentDockToAction == eClose)
+			{
+				if (m_currentDockTo->onCloseFunction)
+				{
+					if (m_currentDockTo->onCloseFunction()) undock(m_currentDockTo);
+				}
+				else undock(m_currentDockTo);
+			}
+			m_currentDockTo = nullptr;
+			m_currentDockToAction = eNull;
+		}
 	};
 
 	void Dockspace::clear()
@@ -394,10 +458,96 @@ namespace ImGuiDock
 		return false;
 	};
 
+	GuiWindow *Dockspace::_isAnyWindowDragging()
+	{
+		for (auto windows : *m_windowListPtr)
+			if (windows->getDockspace()->m_container.splits[0]->activeDock->draging)
+				return windows;
+
+		return nullptr;
+	};
+
+	DockSlot Dockspace::_renderDockSlotPreview(int mx, int my, ImVec2 cPos, ImVec2 cSize)
+	{
+		float halfposx = (cSize.x / 2) + cPos.x;
+		float halfposy = (cSize.y / 2) + cPos.y;
+		float halfScreenSizeY = ImGui::GetIO().DisplaySize.y / 2;
+		float halfScreenSizeX = ImGui::GetIO().DisplaySize.x / 2;
+		float buttonRectHalfSize = 20;
+		float buttonRectOffset = 7;
+
+		DockSlot dockSlot = DockSlot::None;
+		//center
+		if ((mx > (halfposx - 25) && mx < (halfposx + 25)) && (my > (halfposy - 25) && my < (halfposy + 25))) dockSlot = DockSlot::Tab;
+		if ((mx >(halfposx - 85) && mx < (halfposx - 35)) && (my >(halfposy - 25) && my < (halfposy + 25))) dockSlot = DockSlot::Left;
+		if ((mx <(halfposx + 85) && mx >(halfposx + 35)) && (my >(halfposy - 25) && my < (halfposy + 25))) dockSlot = DockSlot::Right;
+		if ((mx >(halfposx - 25) && mx < (halfposx + 25)) && (my >(halfposy + 35) && my < (halfposy + 85))) dockSlot = DockSlot::Bottom;
+		if ((mx >(halfposx - 25) && mx < (halfposx + 25)) && (my < (halfposy - 35) && my >(halfposy - 85))) dockSlot = DockSlot::Top;
+		switch (dockSlot)
+		{
+		case ImGuiDock::DockSlot::Left:
+			ImGui::GetWindowDrawList()->AddRectFilled(cPos, ImVec2(cPos.x + (cSize.x / 2), cPos.y + cSize.y), ImGui::ColorConvertFloat4ToU32(ImVec4(.4, .4, .4, .5)));//tab
+			break;
+		case ImGuiDock::DockSlot::Right:
+			ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(cPos.x + (cSize.x / 2), cPos.y), ImVec2(cPos.x + cSize.x, cPos.y + cSize.y), ImGui::ColorConvertFloat4ToU32(ImVec4(.4, .4, .4, .5)));//tab
+			break;
+		case ImGuiDock::DockSlot::Top:
+			ImGui::GetWindowDrawList()->AddRectFilled(cPos, ImVec2(cPos.x + cSize.x, cPos.y + (cSize.y / 2)), ImGui::ColorConvertFloat4ToU32(ImVec4(.4, .4, .4, .5)));//tab
+			break;
+		case ImGuiDock::DockSlot::Bottom:
+			ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(cPos.x, cPos.y + (cSize.y/2)), ImVec2(cPos.x + cSize.x, cPos.y + cSize.y), ImGui::ColorConvertFloat4ToU32(ImVec4(.4, .4, .4, .5)));//tab
+			break;
+		case ImGuiDock::DockSlot::Tab:
+			ImGui::GetWindowDrawList()->AddRectFilled(cPos, ImVec2(cPos.x + cSize.x, cPos.y + cSize.y), ImGui::ColorConvertFloat4ToU32(ImVec4(.4, .4, .4, .5)));//tab
+			break;
+		}
+
+	/*	ImGui::GetWindowDrawList()->AddRectFilled(
+			ImVec2(buttonRectOffset, halfScreenSizeY - buttonRectHalfSize),
+			ImVec2(2 * buttonRectHalfSize + buttonRectOffset, halfScreenSizeY + buttonRectHalfSize),
+			ImGui::ColorConvertFloat4ToU32(ImVec4(.4, .4, .4, .8)));//left
+		
+		ImGui::GetWindowDrawList()->AddRectFilled(
+			ImVec2(2 * halfScreenSizeX - (2 * buttonRectHalfSize + buttonRectOffset), halfScreenSizeY - buttonRectHalfSize),
+			ImVec2(2 * halfScreenSizeX - buttonRectOffset, halfScreenSizeY + buttonRectHalfSize),
+			ImGui::ColorConvertFloat4ToU32(ImVec4(.4, .4, .4, .8)));//right*/
+
+		//--------------------------------------------------------------------
+		ImGui::GetWindowDrawList()->AddRectFilled(
+			ImVec2(halfposx - buttonRectHalfSize, halfposy - buttonRectHalfSize), 
+			ImVec2(halfposx + buttonRectHalfSize, halfposy + buttonRectHalfSize),
+			ImGui::ColorConvertFloat4ToU32(ImVec4(.4, .4, .4, .8)));//tab
+
+		ImGui::GetWindowDrawList()->AddRectFilled(
+			ImVec2(halfposx - (buttonRectHalfSize * 3 + buttonRectOffset), halfposy - buttonRectHalfSize), 
+			ImVec2(halfposx - (buttonRectOffset + buttonRectHalfSize), halfposy + buttonRectHalfSize),
+			ImGui::ColorConvertFloat4ToU32(ImVec4(.4, .4, .4, .8)));//left
+
+		ImGui::GetWindowDrawList()->AddRectFilled(
+			ImVec2(halfposx + (3 * buttonRectHalfSize + buttonRectOffset), halfposy - buttonRectHalfSize),
+			ImVec2(halfposx + buttonRectOffset + buttonRectHalfSize, halfposy + buttonRectHalfSize),
+			ImGui::ColorConvertFloat4ToU32(ImVec4(.4, .4, .4, .8)));//right
+
+		ImGui::GetWindowDrawList()->AddRectFilled(
+			ImVec2(halfposx - buttonRectHalfSize, halfposy + buttonRectHalfSize + buttonRectOffset),
+			ImVec2(halfposx + buttonRectHalfSize, halfposy + (3 * buttonRectHalfSize + buttonRectOffset)),
+			ImGui::ColorConvertFloat4ToU32(ImVec4(.4, .4, .4, .8)));//bot rev
+		
+		ImGui::GetWindowDrawList()->AddRectFilled(
+			ImVec2(halfposx - buttonRectHalfSize, halfposy - (buttonRectHalfSize + buttonRectOffset)),
+			ImVec2(halfposx + buttonRectHalfSize, halfposy - (3 * buttonRectHalfSize + buttonRectOffset)),
+			ImGui::ColorConvertFloat4ToU32(ImVec4(.4, .4, .4, .8)));//top rev
+		
+		return dockSlot;
+	}
+
 	void Dockspace::_renderTabBar(Container *container, ImVec2 size, ImVec2 cursorPos)
 	{
 		ImGui::SetCursorPos(cursorPos);
 
+		ImGui::PushStyleColor(ImGuiCol_CloseButton, ImVec4(.31, .31, .31, 1));
+		ImGui::PushStyleColor(ImGuiCol_CloseButtonHovered, ImVec4(.3, .3, .3, 1));
+		ImGui::PushStyleColor(ImGuiCol_CloseButtonActive, ImVec4(.2, .2, .2, 1));
 		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(14, 3));
 		for (auto dock : container->docks)
 		{
@@ -421,10 +571,48 @@ namespace ImGuiDock
 			{
 				container->activeDock = dock;
 			}
+			if (ImGui::IsItemActive())
+			{
+				float delta = ImGui::GetCursorScreenPos().y - ImGui::GetIO().MousePos.y;
+				if (dock->container->parent == &m_container && m_container.splits[1] == nullptr)
+				{
+					if (delta < -2 || delta > 2)
+					{
+						m_currentDockToAction = eDrag;
+						m_currentDockTo = dock;
+					}
+				}
+				else
+				{
+					if (delta < -4 || delta > 27)
+					{
+						if (dock->undockable == false)
+						{
+							m_currentDockToAction = eUndock;
+							m_currentDockTo = dock;
+						}
+					}
+				}
+			}
 
 			ImGui::SameLine();
+			
+			/*if (dock->closeButton == true)
+			{
+				ImVec2 backupCursorPos = ImGui::GetCursorScreenPos();
+				ImGui::SetCursorPosX(backupCursorPos.x - 26);
+				ImGui::SetCursorPosY(backupCursorPos.y +10);
+				ImGui::SetItemAllowOverlap();
+				if(ImGui::CloseButton(5, ImVec2(backupCursorPos.x - 18, backupCursorPos.y + 10), 7))
+				{
+					m_currentDockToAction = eClose;
+					m_currentDockTo = dock;
+				}
+				ImGui::SetCursorPos(backupCursorPos);
+			}*/
 			ImGui::PopStyleColor(3);
 		}
 		ImGui::PopStyleVar();
+		ImGui::PopStyleColor(3);
 	};
 }
