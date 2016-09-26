@@ -27,6 +27,6 @@ In render loop call:
 
 Code for undocking to a platform window can be found in another branch but it is broken.
 Maybe better way would be just adding a undock button in context menu or next to close button and on
-click creating a new window with dockspace and just redock there without any manual positioning and sizing and fancy effects.. 
+click creating a new window with dockspace and just redock there without any manual positioning, sizing and fancy effects.. 
 
 Under MIT Licence
