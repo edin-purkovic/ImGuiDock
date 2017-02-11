@@ -1,4 +1,4 @@
-#include "Editor.h"
+#include "ImGuiDock.h"
 
 namespace ImGuiDock
 {
