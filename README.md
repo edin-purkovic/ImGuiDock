@@ -1,7 +1,7 @@
 # ImGuiDock
-Ugly docking code for ImGui
+Docking code for ImGui
 
-For now with most of the features missing including undocking to a platform window, saving layout and closing tabs.
+For now with some of the features missing including undocking to a platform window, saving layout and closing tabs.
 Will add all that later when i find some time...
 
 Use like this:
